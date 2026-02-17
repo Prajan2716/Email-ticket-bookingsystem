@@ -8,6 +8,7 @@ from gmail_handler import (
     get_gmail_credentials,
     get_my_email,
     extract_email,
+    is_noreply_email,
     get_or_create_label,
     fetch_all_threads,
     get_thread_details,
@@ -242,6 +243,7 @@ def sync_mail_to_sheet():
     # Get or create labels
     admin_label = get_or_create_label(gmail, "Awaiting_Admin_Reply")
     cust_label = get_or_create_label(gmail, "Awaiting_Customer_Reply")
+    noreply_label = get_or_create_label(gmail, "No_Reply_Mail")
     print(f"🏷️ Labels configured")
 
     # Get existing tickets (cached - refresh periodically)
@@ -328,6 +330,11 @@ def sync_mail_to_sheet():
         print(f"\n📨 Processing thread {tid}")
         print(f"   From: {from_email}")
         print(f"   Subject: {subject}")
+        
+        # Check if this is a no-reply email
+        is_noreply = is_noreply_email(from_email)
+        if is_noreply:
+            print(f"   🚫 NO-REPLY EMAIL DETECTED: {from_email}")
 
         # Determine if new or existing ticket
         is_new_ticket = tid not in cached_thread_map
@@ -339,6 +346,49 @@ def sync_mail_to_sheet():
         # This prevents duplicates when Gmail returns same thread multiple times
         if tid in thread_state and thread_state[tid] >= ts:
             print(f"   ⏭️ Skipping thread {tid} - already processed in this sync")
+            continue
+        
+        # SPECIAL HANDLING FOR NO-REPLY EMAILS
+        if is_noreply and is_new_ticket:
+            print(f"   🚫 Processing no-reply email as closed ticket")
+            
+            # FINAL SAFETY CHECK: Re-check cache one more time
+            final_check_map = get_all_tickets(main_worksheet)
+            if tid in final_check_map:
+                print(f"   ⚠️ WARNING: Thread {tid} was just created by another process!")
+                print(f"   ⏭️ Skipping to avoid duplicate")
+                cached_thread_map = final_check_map
+                thread_state[tid] = ts
+                continue
+            
+            # Generate ticket ID
+            ticket_id = get_next_ticket_id(sheet)
+            print(f"   🎫 New no-reply ticket: {ticket_id}")
+            
+            # Create ticket with special status
+            status = "No-reply - Closed"
+            row_data = create_ticket_row(ticket_id, tid, from_email, subject, status, new_sender=False)
+            
+            # Add ticket to sheet
+            add_new_ticket(main_worksheet, row_data)
+            print(f"   ✅ Created no-reply ticket {ticket_id}")
+            
+            # Add no-reply label to Gmail
+            update_thread_labels(gmail, tid, [noreply_label], [admin_label, cust_label])
+            print(f"   🏷️ Added 'No_Reply_Mail' label to thread")
+            
+            # Mark as processed and stop thread
+            thread_state[tid] = ts
+            
+            # Update cache
+            cached_thread_map = get_all_tickets(main_worksheet)
+            print(f"   🛑 Thread stopped - no further updates will be processed")
+            continue
+        
+        # Skip if no-reply email on existing ticket (shouldn't happen, but safety check)
+        if is_noreply and not is_new_ticket:
+            print(f"   ⏭️ Skipping - no-reply email on existing ticket")
+            thread_state[tid] = ts
             continue
         
         # Skip NEW threads initiated by admin
