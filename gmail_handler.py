@@ -53,6 +53,39 @@ def extract_email(value):
     return m.group(1).lower() if m else value.lower()
 
 
+def is_noreply_email(email):
+    """
+    Check if email is a no-reply address
+    Returns: True if it's a no-reply email
+    """
+    email_lower = email.lower()
+    
+    # Common no-reply patterns
+    noreply_patterns = [
+        "noreply@",
+        "no-reply@",
+        "no_reply@",
+        "donotreply@",
+        "do-not-reply@",
+        "do_not_reply@",
+        "notifications@",
+        "notification@",
+        "automated@",
+        "automation@",
+        "mailer@",
+        "daemon@",
+        "bounce@",
+        "bounces@"
+    ]
+    
+    # Check if email starts with any no-reply pattern
+    for pattern in noreply_patterns:
+        if email_lower.startswith(pattern):
+            return True
+    
+    return False
+
+
 def get_or_create_label(gmail, name):
     """Get existing label or create new one"""
     labels = gmail.users().labels().list(userId="me").execute()["labels"]
